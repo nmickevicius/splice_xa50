@@ -1,0 +1,72 @@
+##--------------------------------------------------------------------------------
+##  Copyright (C) Siemens Healthcare GmbH, 2015-2018. All Rights Reserved. Confidential.
+##--------------------------------------------------------------------------------
+##
+##    File: \src\MrImagingFW\seq\a_MiniFLASH\makefile.trs
+##
+##    Lang: make
+##
+## Descrip: Makefile fuer Sequenz-DLL
+##
+##--------------------------------------------------------------------------------
+
+NOSYNGO()
+
+IF_WIN(DEBUGGER_CMD("$(OutDir)/SeqTestFrame.exe" "-s $(TargetPath)"))
+
+##-----------------------------------------------------------------------------
+## enter local compiler flags
+##
+CPPFLAGS(-D_CONSOLE)
+CPPFLAGS(-DBUILD_SEQU)
+CPPFLAGS(-DSEQUENCE_CLASS)
+CPPFLAGS(-DSEQUENCE_CLASS_MiniFLASH)
+CPPFLAGS(-DSEQ_NAMESPACE=SEQ_MINIFLASH)
+
+# Defines for WIPParameterTool
+CPPFLAGS(-DWPT_NAMESPACE=MiniFLASH_WPT)
+CPPFLAGS(-DBUILD_WIPParameterTool)
+
+# signal warnings as errors
+IF_WIN(CPPFLAGS(/WX))
+IF_LINUX(CPPFLAGS(-DMR_MORE_WARNINGS))
+
+##-----------------------------------------------------------------------------
+## enter include paths
+##
+
+##-----------------------------------------------------------------------------
+## enter source files
+##
+CPPSOURCES(a_MiniFLASH)
+CPPSOURCES(a_MiniFLASH_UI)
+CPPSOURCESFROM (WIPParameterTool, ../../WIPParameterTool)
+
+##-----------------------------------------------------------------------------
+## enter link libraries
+##
+LDLIBS(libSBB)
+LDLIBS(libSBBFW)
+LDLIBS(libSeqUtil)
+LDLIBS(libSeqUtilFW)
+LDLIBS(libSeqUTIF)
+LDLIBS(libUICtrl)
+IF_WIN(LDLIBS(libUILink)) # for WPT
+LDLIBS(MrGenericDC) # for WPT
+LDLIBS(MrProt)
+LDLIBS(MeasSections)
+LDLIBS(libGSL)
+LDLIBS(CoilIF)
+LDLIBS(MrTrace)
+LDLIBS(UTrace)
+LDLIBS(MeasNucleiBase)
+LDLIBS(libSeqSysProp)
+LDLIBS(MrParc)
+LDLIBS(libMath) # for MrException
+LDLIBS(Reflection)
+
+##-----------------------------------------------------------------------------
+## enter target name
+##
+LIB(MiniFLASH)
+IF_WIN(VS_STARTUP_PROJECT(MiniFLASH))

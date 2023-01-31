@@ -56,6 +56,11 @@ namespace SEQ_NAMESPACE
 ///
 //  --------------------------------------------------------------------------
 
+// special card parameters
+enum eWIPLongParameters {
+    WIPLong_NumShots // NJM: number of shots
+};
+
 class MiniFlashUI : public SequenceUI<MiniFlash>
 {
   public:

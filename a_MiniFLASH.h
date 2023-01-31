@@ -186,7 +186,7 @@ class __IMP_EXP MiniFlash : public StdSeqIF
     //   Return      :  NLS status
     //
     //   --------------------------------------------------------------------------
-    NLS_STATUS runKernel(MrProt& rMrProt, SeqLim& rSeqLim, MrProtocolData::SeqExpo& rSeqExpo, long lKernelMode, long lSlice, long lPartition, long lLine) override;
+    NLS_STATUS runKernel(MrProt& rMrProt, SeqLim& rSeqLim, MrProtocolData::SeqExpo& rSeqExpo, long lKernelMode, long lSlice, long lPartition, long lLine) override; // NJM
 
     NLSStatus receive(SeqLim& rSeqLim, SeqExpo& rSeqExpo, const SEQData& rSEQData) override;
 
@@ -253,6 +253,15 @@ class __IMP_EXP MiniFlash : public StdSeqIF
 
     // NJM: b-value 
     double m_bValue{500.0};
+
+    // NJM: phase encoding indices for each shot 
+    int32_t m_lPhaseEncodeInds[512][8];
+    int32_t m_lEchoTrainLength{32};
+    int32_t m_lNumShots{8};
+    int32_t m_lEchoesToSkip{1};
+    int32_t m_lEcho{0};
+    int32_t m_lRep{0};
+    int32_t m_lRepetitionTimeFill{0};
 
     // * ---------------------------------------------------------------------- *
     // * Slice position information (rotation matrices and shifts)              *

@@ -12,6 +12,7 @@
 //  Application includes
 //  --------------------------------------------------------------------------
 #include "a_MiniFLASH_UI.h"
+#include "MrProtSrv/Domain/CoreNative/MrWipMemBlock.h" // NJM
 
 // --------------------------------------------------------------------------
 // General Includes
@@ -20,7 +21,7 @@
 #include "MrMeasSrv/SeqIF/Sequence/sequmsg.h"
 #ifdef WIN32
 #include "MrImagingFW/libMath/MrException.h"
-
+#include "MrProtSrv/Domain/MrProtocol/UILink/MrStdNameTags.h" // NJM:
 #include "MrCommon/UTrace/Macros.h"
 #endif
 
@@ -158,6 +159,99 @@ unsigned int toolTipHandlerContentQualificationSelection(LINK_SELECTION_TYPE* co
     return MRI_STD_STRING;
 }
 
+// -------------------------------
+// NJM
+unsigned _WIP_Long_GetLabelId(LINK_LONG_TYPE* const, char* arg_list[], int32_t lIndex)
+{
+	static const char* const pszLabel0 = "Num. Shots";
+	switch (lIndex)
+    {
+    case WIPLong_NumShots:	        arg_list[0] = (char*)pszLabel0; break;
+    }
+	return MRI_STD_STRING;
+}
+
+unsigned _WIP_Long_GetUnitId(LINK_LONG_TYPE* const, char* arg_list[], int32_t lIndex)
+{
+    static const char* const pszLabel0 = "";
+    switch (lIndex)
+    {
+    case WIPLong_NumShots:	        arg_list[0] = (char*)pszLabel0; break;
+    }
+	return MRI_STD_STRING;
+}
+
+bool _WIP_Long_IsAvailable(LINK_LONG_TYPE* const pThis, int32_t lIndex)
+{
+    MrProt sThisProt(&pThis->prot());
+	return true;
+}
+
+bool _WIP_Long_GetLimits(LINK_LONG_TYPE* const, std::vector<MrLimitLong>& rLimitVector, uint32_t& rulVerify, int32_t lIndex)
+{
+    //rulVerify = LINK_LONG_TYPE::VERIFY_BINARY_SEARCH;
+	rulVerify = LINK_LONG_TYPE::VERIFY_SCAN_ALL;
+    rLimitVector.resize(1);
+    switch (lIndex)
+    {
+    case WIPLong_NumShots:	        rLimitVector[0].setEqualSpaced(2, 8, 2); break;
+    }
+	return true;
+}
+
+int32_t _WIP_Long_GetValue(LINK_LONG_TYPE* const pThis, int32_t lIndex)
+{
+	MrProt sThisProt(&pThis->prot());  // MrProt wrapper
+
+    switch (lIndex)
+    {
+    case WIPLong_NumShots:	        return sThisProt.getsWipMemBlock().getalFree()[WIPLong_NumShots]; break;
+    }
+
+    return 0;
+}
+
+int32_t _WIP_Long_SetValue(LINK_LONG_TYPE* const pThis, int32_t value, int32_t lIndex)
+{
+	MrProt sThisProt(&pThis->prot()); // MrProt wrapper
+
+    switch (lIndex)
+    {
+    case WIPLong_NumShots:          return sThisProt.getsWipMemBlock().getalFree()[WIPLong_NumShots] = value; break;
+    }
+    return 0;
+}
+
+unsigned _WIP_Long_ToolTip(LINK_LONG_TYPE* const pThis, char* arg_list[], int32_t lIndex)
+{
+	MrProt sThisProt(&pThis->prot());  // MrProt wrapper
+    
+	const size_t size = 1000000;
+	static char tToolTip[size];
+	static char tLine[10000];
+	tToolTip[0] = '\0';
+
+
+	switch (lIndex) 
+    {
+    case WIPLong_NumShots:
+    {
+        sprintf(tLine, "");
+        strncat(tToolTip, tLine, size);
+        break;
+    }
+
+	default:
+		sprintf(tLine, "");
+		strncat(tToolTip, tLine, size);
+		break;
+	}
+
+	arg_list[0] = tToolTip;
+	return MRI_STD_STRING;
+
+}
+
 #endif // end of WIN32
 
 //  --------------------------------------------------------------------------
@@ -215,6 +309,19 @@ NLS_STATUS MiniFlashUI::registerUI(SeqLim& rSeqLim, WPT_NAMESPACE::WIPParameterT
     // register visible handlers
     rTool.registerIsAvailableHandler(WPT_POS_SETCONTENTQ_ENABLED, isAvailableContentQualificationCheckbox);
     rTool.registerIsAvailableHandler(WPT_POS_SETCONTENTQ_VALUE, isAvailableContentQualificationSelection);
+
+    // NJM
+    if (LINK_LONG_TYPE* pLong = _create< LINK_LONG_TYPE >(rSeqLim, MR_TAG_SEQ_WIP1, WIPLong_NumShots))
+    {
+        pLong->registerGetLabelIdHandler(_WIP_Long_GetLabelId);
+        //pLong->registerGetUnitIdHandler(_WIP_Long_GetUnitId);
+        pLong->registerGetLimitsHandler(_WIP_Long_GetLimits);
+        pLong->registerGetValueHandler(_WIP_Long_GetValue);
+        pLong->registerSetValueHandler(_WIP_Long_SetValue);
+        pLong->registerIsAvailableHandler(_WIP_Long_IsAvailable);
+        //pLong->registerSolveHandler(_solveLongParamConflict);
+        pLong->registerGetToolTipIdHandler(_WIP_Long_ToolTip);
+    }
 
 #endif
 

@@ -40,6 +40,8 @@
 #include "MrProtSrv/Domain/MrProtData/MrProt/KSpace/MrKSpace.h"         // KSpace
 #include "MrProtSrv/Domain/MrProtData/MrProt/MeasParameter/MrRXSpec.h"  // MrRXSpec
 #include "MrProtSrv/Domain/MrProtData/MrProt/MeasParameter/MrSysSpec.h" // GradSpec
+#include "MrProtSrv/Domain/CoreNative/MrWipMemBlock.h" // NJM
+#include "MrProtSrv/Domain/CoreNative/MrFastImaging.h" // NJM
 
 #include <cmath>
 #ifdef WIN64
@@ -185,12 +187,12 @@ NLSStatus MiniFlash::initialize(SeqLim& rSeqLim)
     rSeqLim.setAllowedFrequency     (    8000000,  500000000);                         // Always refers to 1H frequency
 
     //                                (index,  min,        max,    increment,  default)
-    rSeqLim.setTR                   (    0,  100,    5000000,           10,    20000);
+    rSeqLim.setTR                   (    0,  100,    5000000,           10,    1000000);
     rSeqLim.setTE                   (    0,  100,     100000,           10,    10000);
     rSeqLim.setBandWidthPerPixel    (    0,   80,        900,           10,      260);
 
     //                              (        min,        max,    increment,  default)
-    rSeqLim.setFlipAngle            (       10.0,       90.0,          1.0,   15.000);
+    rSeqLim.setFlipAngle            (       10.0,       180.0,          1.0,   110.000);
 
 
     //  These parameters have default values, yet are added for convenience
@@ -206,8 +208,10 @@ NLSStatus MiniFlash::initialize(SeqLim& rSeqLim)
 
 
     // NJM: for splice
-    rSeqLim.setContrasts(2,2,1,2);
+    rSeqLim.setSegments(1, 8, 1, 8); // NJM: number of segments = number of shots for FSE
+    rSeqLim.setContrasts(2,2,1,2); // NJM: hard-code 
     rSeqLim.setTE( 1, 100, 100000, 10, 10000);
+    rSeqLim.setRepetitions(1,15,2,1);
     // clang-format on
 
 
@@ -274,6 +278,12 @@ NLSStatus MiniFlash::prepare(MrProt& rMrProt, SeqLim& rSeqLim, MrProtocolData::S
 {
     NLS_STATUS lStatus = MRI_SEQ_SEQU_NORMAL; // Default return value
 
+//     // NJM
+//    if (rSeqLim.isContextPrepForMrProtUpdate())
+//    {
+// 	   rMrProt.getsWipMemBlock().getalFree()[WIPLong_NumShots] = 8;
+//    }
+
     if (!m_WIPParamTool.prepare(rMrProt, rSeqLim))
         return MRI_SEQ_SEQU_ERROR;
 
@@ -288,14 +298,15 @@ NLSStatus MiniFlash::prepare(MrProt& rMrProt, SeqLim& rSeqLim, MrProtocolData::S
         m_lLinesToMeasure));                     // Call by non-constant reference
     m_lCenterLine = rMrProt.kSpace().echoLine(); // 1/2 base resolution for symmetric PE
 
-    const double dMeasureTimeUsec = static_cast<double>(m_lLinesToMeasure) * rMrProt.tr()[0];
-    m_lLinesPerSec                = std::max<int32_t>(1, int32_t(m_lLinesToMeasure * 1000000.0 / dMeasureTimeUsec));
-    rSeqExpo.setRelevantReadoutsForMeasTime(m_lLinesToMeasure / m_lLinesPerSec);
+    // NJM: moved these calcs below
+    //const double dMeasureTimeUsec = static_cast<double>(m_lLinesToMeasure) * rMrProt.tr()[0];
+    //m_lLinesPerSec                = std::max<int32_t>(1, int32_t(m_lLinesToMeasure * 1000000.0 / dMeasureTimeUsec));
+    //rSeqExpo.setRelevantReadoutsForMeasTime(m_lLinesToMeasure / m_lLinesPerSec);
 
     // CONFIGURE RF PULSE PROPERTIES AND PREPARE:
     m_sSRF01.setTypeExcitation();                                      // Resets all moments to 0 in Unit test
     m_sSRF01.setDuration(2560);                                        // Most times are in microseconds
-    m_sSRF01.setFlipAngle(rMrProt.flipAngle());                        // Sets flip angle based on UI (in degrees)
+    m_sSRF01.setFlipAngle(90.0);                        // Sets flip angle based on UI (in degrees)
     m_sSRF01.setInitialPhase(0);                                       // Sets B1 orientation to 0 degrees (+x) in rotating frame
     m_sSRF01.setThickness(rMrProt.sliceSeries().aFront().thickness()); // Sets thickness based on UI (in mm)
     m_sSRF01.setSamples(128);                                          // Number of complex points in waveform
@@ -310,7 +321,7 @@ NLSStatus MiniFlash::prepare(MrProt& rMrProt, SeqLim& rSeqLim, MrProtocolData::S
     // NJM: refocusing pulse
     m_sSRF_ref.setTypeRefocussing();                                      // Resets all moments to 0 in Unit test
     m_sSRF_ref.setDuration(2560);                                        // Most times are in microseconds
-    m_sSRF_ref.setFlipAngle(120.0);                        // Sets flip angle based on UI (in degrees)
+    m_sSRF_ref.setFlipAngle(rMrProt.flipAngle());                        // Sets flip angle based on UI (in degrees)
     m_sSRF_ref.setInitialPhase(90.0);                                       // Sets B1 orientation to 0 degrees (+x) in rotating frame
     m_sSRF_ref.setThickness(rMrProt.sliceSeries().aFront().thickness()); // Sets thickness based on UI (in mm)
     m_sSRF_ref.setSamples(128);                                          // Number of complex points in waveform
@@ -327,6 +338,19 @@ NLSStatus MiniFlash::prepare(MrProt& rMrProt, SeqLim& rSeqLim, MrProtocolData::S
     m_sADC02.setColumns(rMrProt.kSpace().getlBaseResolution());
     m_sADC02.setDwellTime(std::lround(rMrProt.rxSpec().effDwellTime(rSeqLim.getReadoutOSFactor())[0]));
     m_sADC02.getMDH().setKSpaceCentreColumn(static_cast<uint16_t>(rMrProt.kSpace().getlBaseResolution() / 2));
+
+    // NJM: calculate echo train length 
+    m_lEchoTrainLength = (long)(rMrProt.kSpace().getlBaseResolution() / rMrProt.fastImaging().getlSegments());
+
+    // NJM: calculate number of shots needed to cover k-space
+    m_lNumShots = (long)(rMrProt.kSpace().getlBaseResolution() / m_lEchoTrainLength);
+
+    // NJM: get phase encode view ordering 
+    for (int32_t sh = 0; sh < m_lNumShots; sh++) {
+        for (int32_t et = 0; et < m_lEchoTrainLength; et++) {
+            m_lPhaseEncodeInds[et][sh] = et * m_lNumShots + sh;
+        } // echo train
+    } // shots
 
     // An explicit preparation for the ADC is not necessary as setDwellTime() includes .prep
 
@@ -372,6 +396,7 @@ NLSStatus MiniFlash::prepare(MrProt& rMrProt, SeqLim& rSeqLim, MrProtocolData::S
     int32_t lMinPrepTimeR = m_sGS_ref.getTotalTime()/2 + m_sGS_crush.getTotalTime() + m_sGS_Diff_ST.getTotalTime() + rMrProt.te()[0]/2;
     //m_lPrepTimeUs = fSDSRoundUpGRT(2 * MAX(lMinPrepTimeL, lMinPrepTimeR));
     m_lPrepTimeUs = 2 * lMinPrepTimeR;
+
 
     //  PREPARE AND CHECK THE PHASE ENCODING GRADIENT:
     //  First, chose maximum allowed value for gradient performance.
@@ -517,8 +542,20 @@ NLSStatus MiniFlash::prepare(MrProt& rMrProt, SeqLim& rSeqLim, MrProtocolData::S
 
     const int32_t lMinRequiredTR = static_cast<int32_t>(m_sGSliSel.getDuration() - m_sSRF01.getDuration() / 2) + rMrProt.te()[0] + int32_t(m_sADC01.getDuration() / 2)
                                    + std::max<int32_t>(static_cast<int32_t>(m_sGPhasEncRew.getTotalTime()), static_cast<int32_t>(m_sGSpoil.getTotalTime()));
-    if (lMinRequiredTR > rMrProt.tr()[0])
-        return MRI_SBB_SBB_NEGATIV_TRFILL;
+    // if (lMinRequiredTR > rMrProt.tr()[0])
+    //     return MRI_SBB_SBB_NEGATIV_TRFILL;
+
+    // NJM calculate minimum TR
+    // TODO: multislice!
+    int32_t lMinTR = m_sGSliSel.getTotalTime()/2 + m_lPrepTimeUs + rMrProt.te()[0]/2 + (m_lEchoTrainLength + m_lEchoesToSkip) * rMrProt.te()[0] + m_sGSpoil.getTotalTime();
+    if (lMinTR > (rMrProt.tr()[0]))
+       return MRI_SBB_SBB_NEGATIV_TRFILL;
+    m_lRepetitionTimeFill = rMrProt.tr()[0] - lMinTR;
+
+    // NJM: time per measurement
+    const double dMeasureTimeUsec = rMrProt.tr()[0] * m_lNumShots;
+    m_lLinesPerSec                = std::max<int32_t>(1, int32_t(m_lLinesToMeasure * 1000000.0 / dMeasureTimeUsec));
+    rSeqExpo.setRelevantReadoutsForMeasTime(m_lLinesToMeasure / m_lLinesPerSec);
 
     //  PREPARE THE SYNCHRONIZATION EVENT:
     //  Since it occurs at the same time as the slice gradient at the beginning of the event block
@@ -536,9 +573,10 @@ NLSStatus MiniFlash::prepare(MrProt& rMrProt, SeqLim& rSeqLim, MrProtocolData::S
     fSUSetSequenceString("fl", rMrProt, rSeqExpo);
 
     //  Fill export section
-    rSeqExpo.setRFInfo(m_lLinesToMeasure * m_sSRF01.getRFInfo()); // Mandatory for SAR
+    rSeqExpo.setRFInfo((rMrProt.getlRepetitions()+1) * (m_lNumShots * (m_sSRF01.getRFInfo() + (m_lEchoTrainLength + m_lEchoesToSkip +1)*m_sSRF_ref.getRFInfo())) ); // NJM
+    //rSeqExpo.setRFInfo(m_lLinesToMeasure * m_sSRF01.getRFInfo()); // Mandatory for SAR
     rSeqExpo.setMeasureTimeUsec(dMeasureTimeUsec);                // Mandatory for SAR
-    rSeqExpo.setTotalMeasureTimeUsec(dMeasureTimeUsec);           // Mandatory for SAR
+    rSeqExpo.setTotalMeasureTimeUsec(dMeasureTimeUsec * (rMrProt.getlRepetitions()+1));           // Mandatory for SAR
     rSeqExpo.setMeasuredPELines(m_lLinesToMeasure);               // Recommended
     rSeqExpo.setOnlineFFT(SEQ::ONLINE_FFT_PHASE);                 // Necessary for online reconstruction
 
@@ -604,38 +642,92 @@ NLSStatus MiniFlash::run(MrProt& rMrProt, SeqLim& rSeqLim, MrProtocolData::SeqEx
 
     mSEQTest(rMrProt, rSeqLim, rSeqExpo, RTEB_ClockInitTR, 0, 0, m_asSLC[0].getSliceIndex(), 0, 0);
 
-    //  Loop over lines.
+    // m_lPhaseEncodeInds
+
     int32_t lCurrKernelCalls = 0;
-    for (int32_t lLine = 0; lLine < m_lLinesToMeasure; lLine++)
-    {
-        lCurrKernelCalls++;
-        if (!(lCurrKernelCalls % m_lLinesPerSec))
-        {
-            m_sADC01.setRelevantForMeasTime(true);
-            m_sADC02.setRelevantForMeasTime(true); // NJM
-        }
-        else
-        {
-            m_sADC01.setRelevantForMeasTime(false);
-            m_sADC02.setRelevantForMeasTime(false); // NJM
-        }
+    int32_t lLine = 0;
 
-        //  Fill some entries of the measurement data header. These entries can change from line to line.
-        m_sADC01.getMDH().setFirstScanInSlice(lLine == 0);                    // only true if lLine = 0 (first line)
-        m_sADC01.getMDH().setLastScanInSlice(lLine == m_lLinesToMeasure - 1); // only true if lLine = last line
-        m_sADC01.getMDH().setLastScanInConcat(lLine == m_lLinesToMeasure - 1);
-        m_sADC01.getMDH().setLastScanInMeas(lLine == m_lLinesToMeasure - 1);
+    // NJM: loop over repetitions
+    for (m_lRep = 0; m_lRep < (rMrProt.getlRepetitions() + 1); m_lRep++) {
 
-        // NJM: shouldn't need this since entire MDH is copied into m_sADC02 in runKernel()
-        m_sADC02.getMDH().setFirstScanInSlice(lLine == 0);                    // only true if lLine = 0 (first line)
-        m_sADC02.getMDH().setLastScanInSlice(lLine == m_lLinesToMeasure - 1); // only true if lLine = last line
-        m_sADC02.getMDH().setLastScanInConcat(lLine == m_lLinesToMeasure - 1);
-        m_sADC02.getMDH().setLastScanInMeas(lLine == m_lLinesToMeasure - 1);
+        // NJM: loop over shots 
+        for (int32_t lShot = 0; lShot < m_lNumShots; lShot++) {
 
-        //  Call Kernel function
-        //  If the kernel is successful, then loop again; otherwise, exit run method immediately and return error code
-        OnErrorReturn(runKernel(rMrProt, rSeqLim, rSeqExpo, KERNEL_IMAGE, 0, 0, lLine));
-    }
+            // NJM: loop over refocusing pulses 
+            for (m_lEcho = -m_lEchoesToSkip; m_lEcho < m_lEchoTrainLength; m_lEcho++) {
+
+                // NJM: handle dummy echo(es)
+                if (m_lEcho >= 0)
+                    lLine = m_lPhaseEncodeInds[m_lEcho][lShot];
+                else 
+                    lLine = m_lPhaseEncodeInds[0][lShot];
+
+                lCurrKernelCalls++;
+                if (!(lCurrKernelCalls % m_lLinesPerSec))
+                {
+                    m_sADC01.setRelevantForMeasTime(true);
+                    m_sADC02.setRelevantForMeasTime(true); // NJM
+                }
+                else
+                {
+                    m_sADC01.setRelevantForMeasTime(false);
+                    m_sADC02.setRelevantForMeasTime(false); // NJM
+                }
+
+                //  Fill some entries of the measurement data header. These entries can change from line to line.
+                m_sADC01.getMDH().setFirstScanInSlice(lLine == 0);                    // only true if lLine = 0 (first line)
+                m_sADC01.getMDH().setLastScanInSlice(lLine == m_lLinesToMeasure - 1); // only true if lLine = last line
+                m_sADC01.getMDH().setLastScanInConcat(lLine == m_lLinesToMeasure - 1);
+                m_sADC01.getMDH().setLastScanInMeas(lLine == m_lLinesToMeasure - 1);
+
+                // NJM: shouldn't need this since entire MDH is copied into m_sADC02 in runKernel()
+                m_sADC02.getMDH().setFirstScanInSlice(lLine == 0);                    // only true if lLine = 0 (first line)
+                m_sADC02.getMDH().setLastScanInSlice(lLine == m_lLinesToMeasure - 1); // only true if lLine = last line
+                m_sADC02.getMDH().setLastScanInConcat(lLine == m_lLinesToMeasure - 1);
+                m_sADC02.getMDH().setLastScanInMeas(lLine == m_lLinesToMeasure - 1);
+
+                //  Call Kernel function
+                //  If the kernel is successful, then loop again; otherwise, exit run method immediately and return error code
+                OnErrorReturn(runKernel(rMrProt, rSeqLim, rSeqExpo, KERNEL_IMAGE, 0, 0, lLine));
+
+            } // echoes
+
+        } // shots
+
+    } // reps
+
+    // //  Loop over lines.
+    // int32_t lCurrKernelCalls = 0;
+    // for (int32_t lLine = 0; lLine < m_lLinesToMeasure; lLine++)
+    // {
+    //     lCurrKernelCalls++;
+    //     if (!(lCurrKernelCalls % m_lLinesPerSec))
+    //     {
+    //         m_sADC01.setRelevantForMeasTime(true);
+    //         m_sADC02.setRelevantForMeasTime(true); // NJM
+    //     }
+    //     else
+    //     {
+    //         m_sADC01.setRelevantForMeasTime(false);
+    //         m_sADC02.setRelevantForMeasTime(false); // NJM
+    //     }
+
+    //     //  Fill some entries of the measurement data header. These entries can change from line to line.
+    //     m_sADC01.getMDH().setFirstScanInSlice(lLine == 0);                    // only true if lLine = 0 (first line)
+    //     m_sADC01.getMDH().setLastScanInSlice(lLine == m_lLinesToMeasure - 1); // only true if lLine = last line
+    //     m_sADC01.getMDH().setLastScanInConcat(lLine == m_lLinesToMeasure - 1);
+    //     m_sADC01.getMDH().setLastScanInMeas(lLine == m_lLinesToMeasure - 1);
+
+    //     // NJM: shouldn't need this since entire MDH is copied into m_sADC02 in runKernel()
+    //     m_sADC02.getMDH().setFirstScanInSlice(lLine == 0);                    // only true if lLine = 0 (first line)
+    //     m_sADC02.getMDH().setLastScanInSlice(lLine == m_lLinesToMeasure - 1); // only true if lLine = last line
+    //     m_sADC02.getMDH().setLastScanInConcat(lLine == m_lLinesToMeasure - 1);
+    //     m_sADC02.getMDH().setLastScanInMeas(lLine == m_lLinesToMeasure - 1);
+
+    //     //  Call Kernel function
+    //     //  If the kernel is successful, then loop again; otherwise, exit run method immediately and return error code
+    //     OnErrorReturn(runKernel(rMrProt, rSeqLim, rSeqExpo, KERNEL_IMAGE, 0, 0, lLine));
+    // }
 
     //  Finish the sequence test.
     mSEQTest(rMrProt, rSeqLim, rSeqExpo, RTEB_ORIGIN_fSEQRunFinish, 0, 0, 0, 0, 0);
@@ -649,10 +741,6 @@ NLSStatus MiniFlash::run(MrProt& rMrProt, SeqLim& rSeqLim, MrProtocolData::SeqEx
 //. -------------------------------------------------------------------------
 NLS_STATUS MiniFlash::runKernel(MrProt& rMrProt, SeqLim& rSeqLim, MrProtocolData::SeqExpo& rSeqExpo, long lKernelMode, long /* m_lSlice */, long /* m_lPartition */, long lLine)
 {
-
-    //
-    // NJM: TODO: add lEcho as input argument to runKernel() 
-    //
 
 
     NLS_STATUS lStatus = MRI_SEQ_SEQU_NORMAL;
@@ -715,7 +803,7 @@ NLS_STATUS MiniFlash::runKernel(MrProt& rMrProt, SeqLim& rSeqLim, MrProtocolData
 
 
     // NJM: excitation / diffusion preparation module 
-    if (lLine == 0) {
+    if (m_lEcho == -m_lEchoesToSkip) {
 
         fRTEBInit(m_asSLC[0].getROT_MATRIX());
 
@@ -733,7 +821,8 @@ NLS_STATUS MiniFlash::runKernel(MrProt& rMrProt, SeqLim& rSeqLim, MrProtocolData
 
         // NJM: left diffusion gradient
         lT = fSDSRoundDownGRT( m_lPrepTimeUs/2 + m_sGSliSel.getTotalTime()/2 - m_sGS_ref.getTotalTime()/2 - m_sGS_rew_crush.getTotalTime() - m_sGS_Diff_ST.getTotalTime());
-        fRTEI(lT, 0, 0, 0, 0, 0, &m_sGS_Diff_ST, 0);
+        if (m_lRep >= (rMrProt.getlRepetitions()+1)/2) 
+            fRTEI(lT, 0, 0, 0, 0, 0, &m_sGS_Diff_ST, 0);
 
         // NJM: combined slice rewinder and crusher 
         lT += fSDSRoundUpGRT(m_sGS_Diff_ST.getTotalTime());
@@ -757,7 +846,8 @@ NLS_STATUS MiniFlash::runKernel(MrProt& rMrProt, SeqLim& rSeqLim, MrProtocolData
 
         // NJM: right diffusion gradient 
         lT += fSDSRoundUpGRT(m_sGS_crush.getTotalTime());
-        fRTEI(lT, 0, 0, 0, 0, 0, &m_sGS_Diff_ST, 0);
+        if (m_lRep >= (rMrProt.getlRepetitions()+1)/2) 
+            fRTEI(lT, 0, 0, 0, 0, 0, &m_sGS_Diff_ST, 0);
 
         // NJM: readout prephaser here 
         lT += fSDSRoundUpGRT(m_sGS_Diff_ST.getTotalTime());
@@ -803,11 +893,13 @@ NLS_STATUS MiniFlash::runKernel(MrProt& rMrProt, SeqLim& rSeqLim, MrProtocolData
 
     // NJM: play first ADC 
     lT += fSDSRoundUpGRT(m_sGradRO.getRampUpTime());
-    fRTEI(lT, &m_sADC01zSet, 0, &m_sADC01, 0, 0, 0, 0);
+    if (m_lEcho >= 0)
+        fRTEI(lT, &m_sADC01zSet, 0, &m_sADC01, 0, 0, 0, 0);
 
     // NJM: reset first ADC phase 
     lT += fSDSRoundUpGRT(m_sADC01.getDuration());
-    fRTEI(lT, &m_sADC01zNeg, 0, 0, 0, 0, 0, 0);
+    if (m_lEcho >= 0)
+        fRTEI(lT, &m_sADC01zNeg, 0, 0, 0, 0, 0, 0);
 
     // NJM: second readout gradient 
     //lT = fSDSRoundDownGRT(m_sGS_ref.getTotalTime()/2 + rMrProt.te()[0]/2 - m_sGradRO.getRampDownTime()/2);
@@ -815,11 +907,13 @@ NLS_STATUS MiniFlash::runKernel(MrProt& rMrProt, SeqLim& rSeqLim, MrProtocolData
 
     // NJM: play second ADC 
     lT += fSDSRoundUpGRT(m_sGradRO.getRampUpTime());
-    fRTEI(lT, &m_sADC02zSet, 0, &m_sADC02, 0, 0, 0, 0);
+    if (m_lEcho >= 0)
+        fRTEI(lT, &m_sADC02zSet, 0, &m_sADC02, 0, 0, 0, 0);
 
     // NJM: reset second ADC phase 
     lT += fSDSRoundUpGRT(m_sADC02.getDuration());
-    fRTEI(lT, &m_sADC02zNeg, 0, 0, 0, 0, 0, 0);
+    if (m_lEcho >= 0)
+        fRTEI(lT, &m_sADC02zNeg, 0, 0, 0, 0, 0, 0);
 
     // NJM: phase encode rewinder 
     lT = fSDSRoundDownGRT( m_sGS_ref.getTotalTime()/2 + rMrProt.te()[0] - m_sGS_ref.getTotalTime()/2 - m_sGPhasEncRew.getTotalTime());
@@ -829,8 +923,23 @@ NLS_STATUS MiniFlash::runKernel(MrProt& rMrProt, SeqLim& rSeqLim, MrProtocolData
     lT = fSDSRoundDownGRT( m_sGS_ref.getTotalTime()/2 + rMrProt.te()[0] - m_sGS_ref.getTotalTime()/2 - m_sGPhasEncRew.getTotalTime());
     fRTEI(lT, 0, 0, 0, 0, 0, &m_sGS_crush, 0);
 
-    // NJM: delay until end of crusher 
+    // NJM: increment time
     lT += fSDSRoundUpGRT(m_sGS_crush.getTotalTime());
+
+    // NJM: end of echo train spoiler
+    if (m_lEcho == (m_lEchoTrainLength - 1)) {
+        fRTEI(lT, 0, 0, 0, 0, 0, &m_sGSpoil, 0);
+        lT += fSDSRoundUpGRT(m_sGS_crush.getTotalTime());
+    }
+
+    // NJM: extra delay for TR 
+    // TODO: include slice in this conditional
+    if (m_lEcho == (m_lEchoTrainLength - 1)) {
+        lT += fSDSRoundUpGRT(m_lRepetitionTimeFill);
+
+    }
+
+    // NJM: execute delay
     fRTEI(lT, 0, 0, 0, 0, 0, 0, 0);
 
     // NJM: end the event block 
